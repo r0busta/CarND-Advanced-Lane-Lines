@@ -12,3 +12,10 @@ def plot_images(images):
         plt.imshow(img, cmap='gray')
 
     plt.show()
+
+
+def moving_avg(curr_avg, val, samples_count):
+    res = curr_avg
+    res -= res / samples_count
+    res += val / samples_count
+    return res

@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 import matplotlib.image as mpimg
 from moviepy.editor import VideoFileClip
-from utils import plot_images
+from utils import plot_images, moving_avg
 import matplotlib.pyplot as plt
 
 
@@ -16,7 +16,7 @@ NUM_CHESSBRD_CORNERS_Y = 6
 IMG_WIDTH = 1280
 IMG_HEIGHT = 720
 
-TRANSFORM_SRC = np.float32([[563, 475], [746, 475], [1120, 720], [160, 720]])
+TRANSFORM_SRC = np.float32([[595, 450], [689, 450], [1104, 720], [215, 720]])
 TRANSFORM_DST = np.float32([[250, 0], [IMG_WIDTH - 250, 0], [IMG_WIDTH - 250, IMG_HEIGHT], [250, IMG_HEIGHT]])
 
 M = None
@@ -24,6 +24,10 @@ M_INV = None
 
 M_PER_PX_X = 3.7 / 700  # meters per pixel in x dimension
 M_PER_PX_Y = 30 / 720  # meters per pixel in y dimension
+
+SMOOTHING_WINDOW = 3
+FRAMES_COUNT = 0
+FRAME_FIT = []
 
 
 def find_corners(img):
@@ -99,27 +103,29 @@ def get_inv_transform_matr():
     return cv2.getPerspectiveTransform(TRANSFORM_DST, TRANSFORM_SRC)
 
 
-def get_binary(img, s_thresh=(90, 240), sx_thresh=(10, 255)):
+def get_binary(img, l_thresh=(0, 255), b_thresh=(0, 255)):
     """ Get a threshold binary image.
     """
     img = np.copy(img)
 
     # Using different color channels.
-    # Convert to HLS color space and separate L and S channels
+    # Convert to HLS color space and separate L channel
     hls = cv2.cvtColor(img, cv2.COLOR_RGB2HLS).astype(np.float)
     l_channel = hls[:, :, 1]
-    s_channel = hls[:, :, 2]
+    # Convert to Lab color space and separate b channel
+    lab = cv2.cvtColor(img, cv2.COLOR_RGB2Lab)
+    b_channel = lab[:, :, 2]
 
     # Threshold L channel
     l_binary = np.zeros_like(l_channel)
-    l_binary[(l_channel >= sx_thresh[0]) & (l_channel <= sx_thresh[1])] = 1
+    l_binary[(l_channel >= l_thresh[0]) & (l_channel <= l_thresh[1])] = 1
 
-    # Threshold S channel
-    s_binary = np.zeros_like(s_channel)
-    s_binary[(s_channel >= s_thresh[0]) & (s_channel <= s_thresh[1])] = 1
+    # Threshold b channel
+    b_binary = np.zeros_like(b_channel)
+    b_binary[(b_channel >= b_thresh[0]) & (b_channel <= b_thresh[1])] = 1
 
     combined_binary = np.zeros_like(l_binary)
-    combined_binary[(s_binary == 1) | (l_binary == 1)] = 1
+    combined_binary[(l_binary == 1) | (b_binary == 1)] = 1
 
     return combined_binary
 
@@ -145,14 +151,29 @@ def get_offset_m(leftx, rightx):
     return ((IMG_WIDTH / 2) - (leftx[0] + rightx[0]) / 2) * M_PER_PX_X
 
 
+def calc_frames_count():
+    global FRAMES_COUNT
+    if FRAMES_COUNT < SMOOTHING_WINDOW:
+        FRAMES_COUNT += 1
+
+
 def draw_lane(img, binary_warped, ploty, left_fitx, right_fitx):
     # Create an image to draw the lines on
     warp_zero = np.zeros_like(binary_warped).astype(np.uint8)
     color_warp = np.dstack((warp_zero, warp_zero, warp_zero))
 
+    calc_frames_count()
+
+    if FRAMES_COUNT == 1:
+        FRAME_FIT.append(np.copy(left_fitx))
+        FRAME_FIT.append(np.copy(right_fitx))
+    else:
+        FRAME_FIT[0] = moving_avg(FRAME_FIT[0], left_fitx, FRAMES_COUNT)
+        FRAME_FIT[1] = moving_avg(FRAME_FIT[1], right_fitx, FRAMES_COUNT)
+
     # Recast the x and y points into usable format for cv2.fillPoly()
-    pts_left = np.array([np.transpose(np.vstack([left_fitx, ploty]))])
-    pts_right = np.array([np.flipud(np.transpose(np.vstack([right_fitx, ploty])))])
+    pts_left = np.array([np.transpose(np.vstack([FRAME_FIT[0], ploty]))])
+    pts_right = np.array([np.flipud(np.transpose(np.vstack([FRAME_FIT[1], ploty])))])
     pts = np.hstack((pts_left, pts_right))
 
     # Draw the lane onto the warped blank image
@@ -270,9 +291,8 @@ def process_image(img):
     """
     undistorted = undistort(img)
     warped = transform(undistorted)
-    binary_warped = get_binary(warped, (200, 255), (210, 255))
-
-    return detect_lane(img, binary_warped)
+    binary_warped = get_binary(warped, (225, 255), (155, 200))
+    return detect_lane(undistorted, binary_warped)
 
 
 if __name__ == '__main__':

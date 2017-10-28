@@ -56,7 +56,7 @@ After camera calibration, the processing pipeline can apply the distortion corre
 
 *2. Describe how (and identify where in your code) you used color transforms, gradients or other methods to create a thresholded binary image.  Provide an example of a binary image result.*
 
-I used a combination of HLS channel thresholds to generate a binary image (`get_binary()` function).  
+I used a combination of thresholds of L and b channels (HLS and Lab color spaces) to generate a binary image (`get_binary()` function).  
 Here's an example of my output for this step.
 
 ![Binary example][image3]
